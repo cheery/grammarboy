@@ -1,0 +1,228 @@
+#!/usr/bin/python3
+
+def main():
+    #text = input("> ")
+    grammar = Grammar()
+    #grammar.add("cons = sym")
+    grammar.add("cons = sym spc sym")
+    #grammar.add("cons = sym spc cons")
+    grammar.add("cons = cons spc cons")
+
+    text = "a b c d"
+    tokens = list(tokenize(text))
+    print(len(tokens))
+    tab, apl = cyk(tokens, grammar)
+    if len(tab[-1][0]) == 1:
+        (result, count), = list(tab[-1][0].items())
+    else:
+        result = None
+
+    solution = tab[-1][0]
+    print_table(tab)
+    print_table(apl)
+#    if ambiguous:
+#        print("input ambiguous", ambiguous)
+#        for (layer, index), rules in ambiguous.items():
+#            for rule in rules:
+#                for rule_id, rule, lhs, rhs, k in find_all_rules(apl[layer][index], rule, grammar):
+#                    print(rule, "=", lhs, rhs, layer, index, k)
+#                print()
+#                    l = layer-1-k
+#                    j = index+k+1
+#                    if lhs in grammar.nonterminals:
+#                        lhs_rule_id, lhs, lsym = find_birule(apl[k][index], lhs, grammar)
+#                        print("   ", lhs, "=", lsym)
+#                    if rhs in grammar.nonterminals:
+#                        rhs_rule_id, rhs, rsym = find_birule(apl[l][j], rhs, grammar)
+#                        print("   ", rhs, "=", rsym)
+
+    if result:
+        print("input complete")
+    if result and count == 1:
+        print(read(tokens, apl, grammar, result))
+
+def read(tokens, apl, grammar, accept):
+    stack = []                          # reduction stack
+    state = [(accept, len(apl)-1, 0)]   # unvisited stack
+    data  = []
+
+    while len(state) > 0:
+        accept, layer, i = state.pop(-1)
+        while layer > 0:
+            cell = apl[layer][i]
+            rule_id, rule, lhs, rhs, k = find_rule(cell, accept, grammar)
+            l = layer-1-k
+            j = i+k+1
+            stack.append((rule_id, i))
+            state.append((lhs, k, i))
+            accept, layer, i = rhs, l, j
+        
+        tok = tokens.pop(-1)
+        if tok.type == accept:
+            data.append(tok)
+        else:
+            data.append((accept, tok))
+        if stack[-1][1] == i:
+            rule_id = stack.pop(-1)[0]
+            lhs     = data.pop(-1)
+            rhs     = data.pop(-1)
+            data.append((rule_id, lhs, rhs))
+    assert len(data) == 1, (data, len(data))
+    return data[0]
+
+def find_rule(cell, accept, grammar):
+    for rule_id, k in cell:
+        rule, lhs, rhs = grammar.tri[rule_id]
+        if rule == accept:
+            return rule_id, rule, lhs, rhs, k
+
+def find_birule(cell, accept, grammar):
+    for rule_id, k in cell:
+        rule, sym = grammar.bi[-rule_id-1]
+        if rule == accept:
+            return rule_id, rule, sym
+
+def find_all_rules(cell, accept, grammar):
+    for rule_id, k in cell:
+        rule, lhs, rhs = grammar.tri[rule_id]
+        if rule == accept:
+            yield rule_id, rule, lhs, rhs, k
+
+def cyk(tokens, grammar):
+    tab = list() # cyk       table
+    apl = list() # structure table
+    for cols in range(len(tokens), 0, -1):
+        tab.append([{} for _ in range(cols)])
+        apl.append([[] for _ in range(cols)])
+
+    row   = tab[0]
+    for i, token in enumerate(tokens):
+        cell = row[i]
+        cell[token.type] = cell.get(token.type, 0) + 1
+        for rule_id, (rule, type) in enumerate(grammar.bi):
+            if token.type == type:
+                cell[rule] = cell.get(rule, 0) + 1
+                apl[0][i].append((-rule_id-1, None))
+
+    for layer in range(1, len(tab)):
+        row   = tab[layer]
+        for i in range(len(tokens) - layer):
+            cell = row[i]
+            for k in range(layer):
+                l = layer-1-k
+                j = i+k+1
+                for rule_id, (rule, lhs, rhs) in enumerate(grammar.tri):
+                    print(rule_id, rule, "=", lhs, rhs)
+                    if lhs in tab[k][i] and rhs in tab[l][j]:
+                        lc = tab[k][i][lhs]
+                        rc = tab[l][j][rhs]
+                        cell[rule] = score = cell.get(rule, 0) + lc*rc
+                        apl[layer][i].append((rule_id, k))
+    return tab, apl
+
+def print_table(tab):
+    for row in tab:
+        print(row)
+    print()
+
+# let the input be a string S consisting of n characters: a1 ... an.
+# let the grammar contain r nonterminal symbols R1 ... Rr.
+# This grammar contains the subset Rs which is the set of start symbols.
+# let P[n,n,r] be an array of booleans. Initialize all elements of P to false.
+#    p = list([[False] * len(grammar) for tok in tokens] for tok in tokens)
+#    print(p)
+#    print(len(grammar))
+#    for i, tok in enumerate(tokens):
+#        for rule in birules:
+#            if rule[1] == tok.type:
+#                p[i][0][rule[0]] = True
+#    print(p)
+#    for j in range(1, len(tokens)):
+#        for i in range(0, len(tokens) - j):
+#            for k in range(0, j - 1):
+#                for rule in trirules:
+#                    if p[i][k][rule[1]] and p[i+k][j-k][rule[2]]:
+#                        p[i][j][rule[0]] = True
+
+class Grammar:
+    def __init__(self):
+        self.nonterminals = set()
+        self.bi  = [ ]
+        self.tri = [ ]
+
+    def add_bi(self, rule, sym):
+        rule_data = [rule, sym]
+        if rule_data in self.tri:
+            rule_id = -self.bi.index(rule_data)-1
+        else:
+            rule_id = -len(self.bi)-1
+            self.bi.append(rule_data)
+        return rule_id
+
+    def add_tri(self, rule, lhs, rhs):
+        rule_data = [rule, lhs, rhs]
+        if rule_data in self.tri:
+            rule_id = self.tri.index(rule_data)
+        else:
+            print("create", rule_data)
+            rule_id = len(self.tri)
+            self.tri.append(rule_data)
+        return rule_id
+
+    def add_rule(self, rule, *sequence):
+        if len(sequence) == 1:
+            rule_id = self.add_bi(rule, *sequence)
+        elif len(sequence) == 2:
+            rule_id = self.add_tri(rule, *sequence)
+        else:
+            rule_id = len(self.tri)
+            lhs = sequence[0]
+            rhs = sequence[1:]
+            rhs_rule = ' '.join(rhs)
+            rule_id = self.add_tri(rule, lhs, rhs_rule)
+            self.add_rule(rhs_rule, *rhs)
+        self.nonterminals.add(rule)
+
+    def add(self, text):
+        rule, seq = text.split(' = ')
+        self.add_rule(rule, *seq.split(' '))
+
+def tokenize(text):
+    ch = None
+    def advance():
+        nonlocal ch, text
+        last = ch
+        ch   = text[:1]
+        text = text[1:]
+        return last
+    advance()
+    while ch:
+        string = ""
+        if issym(ch):
+            while issym(ch):
+                string += advance()
+            yield Token("sym", string)
+        elif ch == " ":
+            while ch == " ":
+                string += advance()
+            yield Token("spc", len(string))
+        elif isnum(ch):
+            while isnum(ch):
+                string += advance()
+            yield Token("num", int(string))
+
+issym   = lambda text: text.isalpha()
+isnum   = lambda text: text.isdigit()
+isspace = lambda text: text.isspace()
+
+
+class Token:
+    def __init__(self, type, val):
+        self.type = type
+        self.val  = val
+
+    def __repr__(self):
+        return "{0.type} {0.val!r}".format(self)
+
+if __name__=='__main__':
+    main()
