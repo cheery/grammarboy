@@ -127,6 +127,12 @@ class Result:
         for var, length, count in self.trees:
             yield var
 
+    def __len__(self):
+        return len(self.trees)
+
+    def __getitem__(self, index):
+        return self.trees[index][0]
+
 def traverse(table, trees, visitor, args):
     index = 0
     output = []
@@ -196,6 +202,8 @@ class near(cyk.Specifier):
         self.sym = sym
 
     def match(self, token):
+        if isinstance(self.sym, cyk.Specifier):
+            return (not token.near) and self.sym.match(token)
         return token.near and token.type == self.sym
 
     def __eq__(self, other):
@@ -208,14 +216,18 @@ class near(cyk.Specifier):
         return "near({})".format(self.sym)
 
     def validate(self, terminals):
+        if isinstance(self.sym, cyk.Specifier):
+            return self.sym.validate(terminals)
         if self.sym not in terminals:
-            raise Exception("{} of {} is not a terminal".format(self.sym, self))
+            raise Exception("{} of {} is not a terminal or a specifier".format(self.sym, self))
 
 class far(cyk.Specifier):
     def __init__(self, sym):
         self.sym = sym
 
     def match(self, token):
+        if isinstance(self.sym, cyk.Specifier):
+            return (not token.near) and self.sym.match(token)
         return (not token.near) and token.type == self.sym
 
     def __eq__(self, other):
@@ -228,6 +240,8 @@ class far(cyk.Specifier):
         return "far({})".format(self.sym)
 
     def validate(self, terminals):
+        if isinstance(self.sym, cyk.Specifier):
+            return self.sym.validate(terminals)
         if self.sym not in terminals:
             raise Exception("{} of {} is not a terminal".format(self.sym, self))
 
@@ -285,6 +299,8 @@ def tokenize(text, location=1000):
             while isnum(ch):
                 string += advance()
             yield token("num", int(string))
+        else:
+            yield token("unk", advance())
 
 issym   = lambda text: text.isalpha()
 isnum   = lambda text: text.isdigit()

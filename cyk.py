@@ -63,13 +63,16 @@ def cnf(rules, terminals):
             row.update(merge)
             changed |= len(row) > k
 
-    return CNF(leadtab, inits, pairs)
+    return CNF(leadtab, inits, pairs, terminals, nonterminals, specifiers)
 
 class CNF:
-    def __init__(self, leads, inits, pairs):
+    def __init__(self, leads, inits, pairs, terminals, nonterminals, specifiers):
         self.leads = leads
         self.inits = inits
         self.pairs = pairs
+        self.terminals    = terminals
+        self.nonterminals = nonterminals
+        self.specifiers   = specifiers
 
 class Lead:
     def __init__(self, var, rule, node):
