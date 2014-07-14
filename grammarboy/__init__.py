@@ -1,4 +1,4 @@
-import cyk
+from . import cyk
 
 def main():
     grammar = Grammar()
@@ -6,40 +6,147 @@ def main():
     grammar.rule("term", "sym")
     grammar.rule("expr", "term")
     grammar.rule("expr", "expr", keyword("plus"), "term")
+    grammar.rule("stmt", keyword("return"), "expr")
+    lengths, seqs   = shortest_sequences(grammar)
+    groups = rules_by_nonterminal(grammar)
 
-    results = grammar.parse(tokenize("hello plus ppe"))
 
-    print("count:", len(results))
-    print("shortest:", results.shortest)
-    tot = 0
-    for result in results:
-        print(list(result))
-        if result.ambiguity == 1:
-            print(result.traverse())
-        print(result.explain())
-        tot += 1
+    print(seqs)
 
-    #matcher = difflib.SequenceMatcher(None)
-    #matches = []
-    #for result in islice(results, 0, 10):
-    #    matcher.set_seq1(list(result))
-    #    print(list(result), result.ambiguity)
-    #    for rule in grammar.bi:
-    #        if rule.row:
-    #            matcher.set_seq2(list(rule))
-    #            ratio = matcher.ratio()
-    #            if ratio > 0.0:
-    #                matches.append((ratio, rule, list(result)))
-    #matches.sort(key=lambda x: -x[0])
-    #print_table(matches)
+    distances = completion_distance_to(grammar, lengths, groups, {"stmt"})
 
-    print("redesign", tot)
+    for key, item in distances.items():
+        print(key, item)
+
+def intervals(results):
+    iv = set()
+    for result in results.just(results.shortest):
+        interval = []
+        for var, length, count in result.trees:
+            interval.append(length)
+        iv.add(tuple(interval))
+    return iv
+
+def visualize_intervals(results):
+    tokens = results.tab[0]
+    for interval in sorted(intervals(results)):
+        offset = 0
+        s = ''
+        for length in interval:
+            start = tokens[offset].pos % 1000
+            tok = tokens[offset+length-1]
+            stop = tok.pos % 1000 + tok.length
+            s += " " * (start - len(s))
+            if tok.length > 1:
+                s += "|"
+                s += "-" * (stop - start - 2)
+                s += "|"
+            else:
+                s += "'"
+            offset += length
+        yield s
+
+def relevant_ruleset(results):
+    inversions = rule_inversions(results.grammar)
+    ruleset = set()
+    for result in results.just(results.shortest):
+        inv = []
+        for cell in result:
+            for index, rule in inversions.get(cell, ()):
+                if len(rule) > 1:
+                    ruleset.add(rule)
+    return ruleset 
+
+def rule_inversions(grammar):
+    inversions = {}
+    for rule in grammar.rules:
+        for index, cell in enumerate(rule):
+            if cell not in inversions:
+                inversions[cell] = []
+            inversions[cell].append((index, rule))
+    return inversions
+
+def completion_distance_to(grammar, lengths, groups, goals):
+    distance = {}
+    queue = []
+    for goal in goals:
+        distance[goal] = 0
+        queue.append(goal)
+    while queue:
+        current   = queue.pop(0)
+        d_current = distance[current]
+        for rule in groups.get(current, ()):
+            weight = sum(lengths[cell] for cell in rule)
+            for cell in rule:
+                d = weight - lengths[cell] + d_current
+                if cell in distance:
+                    distance[cell] = min(distance[cell], d)
+                else:
+                    queue.append(cell)
+                    distance[cell] = d
+        queue.sort(key=lambda cell: distance[cell])
+    return distance
+
+def shortest_sequences(grammar):
+    lengths = {}
+    sequences = {}
+    for term in grammar.terminals:
+        lengths[term] = 1
+        sequences[term] = [term]
+    for term in grammar.cnf.specifiers:
+        lengths[term] = 1
+        sequences[term] = [term]
+
+    def price_sum(rule):
+        price = 0
+        for cell in rule:
+            if cell not in lengths:
+                return None
+            price += lengths[cell]
+        return price
+
+    unrelaxed = True
+    while unrelaxed:
+        unrelaxed = False
+        for rule in grammar.rules:
+            p = price_sum(rule)
+            if p:
+                cat = []
+                for cell in rule:
+                    cat += sequences[cell]
+                was = lengths.get(rule.var, p+1)
+                lengths[rule.var] = min(p,was)
+                if p < was:
+                    sequences[rule.var] = cat
+                unrelaxed |= p < was
+
+    rule_sequences = {}
+    for rule in grammar.rules:
+        cat = []
+        for cell in rule:
+            cat += sequences[cell]
+        rule_sequences[rule] = cat
+    return lengths, rule_sequences
+
+def rules_by_nonterminal(grammar):
+    nonterminals = {}
+    for rule in grammar.rules:
+        if rule.var not in nonterminals:
+            nonterminals[rule.var] = []
+        nonterminals[rule.var].append(rule)
+    return nonterminals
 
 class Grammar:
     def __init__(self, rules=None, terminals=None):
         self.rules = rules or set()
         self.terminals = terminals or set()
-        self.cnf = None
+        self._cnf = None
+
+    @property
+    def cnf(self):
+        if self._cnf is None:
+            self._cnf = cyk.cnf(self.rules, self.terminals)
+        return self._cnf
         
     def rule(self, var, *sequence):
         rule = Rule(var, sequence)
@@ -53,8 +160,6 @@ class Grammar:
         return Grammar(self.rules | other.rules, self.terminals | other.terminals)
 
     def parse(self, tokens):
-        if self.cnf is None:
-            self.cnf = cyk.cnf(self.rules, self.terminals)
         tokens = list(tokens)
         tab, apl, mintab = cyk.cyk(tokens, self.cnf)
         return Table(self, tab, apl, mintab)
@@ -246,27 +351,25 @@ class far(cyk.Specifier):
             raise Exception("{} of {} is not a terminal".format(self.sym, self))
 
 class keyword(cyk.Specifier):
-    def __init__(self, val, type="sym"):
+    def __init__(self, val):
         self.val  = val
-        self.type = type
 
     def match(self, token):
-        return self.val == token.val and self.type == token.type
+        return self.val == token.val
 
     def __eq__(self, other):
-        return type(self) == type(other) and self.val == other.val and self.type == other.type
+        return type(self) == type(other) and self.val == other.val
 
     def __hash__(self):
-        return hash((type(self), self.val, self.type))
+        return hash((type(self), self.val))
 
     def __repr__(self):
-        return "keyword({}, {})".format(self.val, self.type)
+        return "keyword({})".format(self.val)
 
     def validate(self, terminals):
-        if self.type not in terminals:
-            raise Exception("{} of {} is not a terminal".format(self.type, self))
+        pass
 
-def tokenize(text, location=1000):
+def tokenize(text, keywords, location=1000):
     ch  = None
     pos = location - 2
     near = True
@@ -283,14 +386,17 @@ def tokenize(text, location=1000):
         nonlocal near
         w = near
         near  = True
-        return Token(pos, type, val, w)
+        return Token(pos - len(string) + 1, len(string), type, val, w)
     advance()
     while ch:
         string = ""
         if issym(ch):
             while issym(ch):
                 string += advance()
-            yield token("sym", string)
+            if string in keywords:
+                yield token("keyword", string)
+            else:
+                yield token("sym", string)
         elif ch == " ":
             while ch == " ":
                 string += advance()
@@ -300,18 +406,20 @@ def tokenize(text, location=1000):
                 string += advance()
             yield token("num", int(string))
         else:
-            yield token("unk", advance())
+            string += advance()
+            yield token("unk", string)
 
 issym   = lambda text: text.isalpha()
 isnum   = lambda text: text.isdigit()
 isspace = lambda text: text.isspace()
 
 class Token:
-    def __init__(self, pos, type, val, near):
-        self.pos  = pos
-        self.type = type
-        self.val  = val
-        self.near = near
+    def __init__(self, pos, length, type, val, near):
+        self.pos    = pos
+        self.length = length
+        self.type   = type
+        self.val    = val
+        self.near   = near
 
     def __repr__(self):
         return "{0.type} {0.val!r} at {0.pos}".format(self)

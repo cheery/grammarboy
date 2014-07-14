@@ -230,7 +230,7 @@ def build_mintab(tab):
             if solution:
                 s = shortest[i+length] + 1
                 mintab[length][i] = s
-                score = min(score, length)
+                score = min(score, s)
         shortest[i] = score
     return mintab
 
